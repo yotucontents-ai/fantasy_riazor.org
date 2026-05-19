@@ -689,6 +689,24 @@ footer { background: var(--bg-2); border-top: 1px solid var(--border); padding: 
 .locked-notice-text { font-size: .9rem; color: var(--text-muted); }
 .locked-notice-text strong { color: var(--gold); }
 
+/* ─── LOGIN GATE ─────────────────────────── */
+.login-gate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 1.5rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  padding: 4rem 2rem;
+  margin-bottom: 2rem;
+}
+.login-gate-icon { color: var(--text-dim); }
+.login-gate-text strong { display: block; font-size: 1.2rem; color: var(--white); margin-bottom: .5rem; }
+.login-gate-text p { font-size: .9rem; color: var(--text-muted); max-width: 380px; line-height: 1.6; }
+.login-gate-btns { display: flex; gap: .8rem; flex-wrap: wrap; justify-content: center; }
+
 /* ─── LOADING ─────────────────────────────── */
 .loading-screen { min-height: 100svh; display: flex; align-items: center; justify-content: center; }
 .loading-spinner { width: 48px; height: 48px; border: 3px solid rgba(255,255,255,.1); border-top-color: var(--gold); border-radius: 50%; animation: spin 0.8s linear infinite; }

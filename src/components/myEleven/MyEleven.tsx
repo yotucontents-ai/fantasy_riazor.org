@@ -4,6 +4,7 @@ import { PitchSidebar } from './PitchSidebar';
 import { PlayerModal } from './PlayerModal';
 import { showToast } from '../Toast';
 import { ALL_PLAYERS, CAT_TO_POSITIONS, POSITIONS } from '../../data/players';
+import { Link } from 'react-router-dom';
 import { savePrediction, getPrediction } from '../../firebase/db';
 import { useAuth } from '../../context/AuthContext';
 import type { LineupState, Player, Position, Round } from '../../types';
@@ -128,6 +129,7 @@ export function MyEleven({ round, onPickedCountChange }: Props) {
   }
 
   const count = Object.keys(state.picked).length;
+  const notLoggedIn = !firebaseUser;
 
   return (
     <section id="once" ref={ref}>
@@ -137,19 +139,38 @@ export function MyEleven({ round, onPickedCountChange }: Props) {
         Toca cada posición en el campo para asignar jugador. Formación 4–4–2.
       </p>
 
-      {isLocked && (
-        <div className="locked-notice reveal">
-          <span className="locked-notice-icon">🔒</span>
-          <div className="locked-notice-text">
-            {!round
-              ? <><strong>Sin jornada activa.</strong> El administrador debe crear una jornada.</>
-              : round.status === 'locked'
-              ? <><strong>Jornada cerrada.</strong> El plazo de envío ha terminado.</>
-              : <><strong>Jornada completada.</strong> Ya se han calculado los puntos.</>
-            }
+      {notLoggedIn ? (
+        <div className="login-gate reveal">
+          <div className="login-gate-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" width="48" height="48">
+              <circle cx="12" cy="8" r="4"/>
+              <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+            </svg>
+          </div>
+          <div className="login-gate-text">
+            <strong>Inicia sesión para participar</strong>
+            <p>Necesitas una cuenta para enviar tu alineación, elegir el MVP y predecir el marcador.</p>
+          </div>
+          <div className="login-gate-btns">
+            <Link to="/login" className="btn-gold" style={{ textDecoration: 'none' }}>Iniciar sesión</Link>
+            <Link to="/login" className="btn-ghost" style={{ textDecoration: 'none' }} state={{ mode: 'register' }}>Crear cuenta</Link>
           </div>
         </div>
-      )}
+      ) : (
+        <>
+          {isLocked && (
+            <div className="locked-notice reveal">
+              <span className="locked-notice-icon">🔒</span>
+              <div className="locked-notice-text">
+                {!round
+                  ? <><strong>Sin jornada activa.</strong> El administrador debe crear una jornada.</>
+                  : round.status === 'locked'
+                  ? <><strong>Jornada cerrada.</strong> El plazo de envío ha terminado.</>
+                  : <><strong>Jornada completada.</strong> Ya se han calculado los puntos.</>
+                }
+              </div>
+            </div>
+          )}
 
       <div className="once-layout" style={{ pointerEvents: isLocked ? 'none' : undefined, opacity: isLocked ? 0.6 : 1 }}>
         <div className="reveal">
@@ -181,12 +202,14 @@ export function MyEleven({ round, onPickedCountChange }: Props) {
         </div>
       )}
 
-      <PlayerModal
-        pos={modalPos}
-        state={state}
-        onSelect={handleSelect}
-        onClose={() => setModalPos(null)}
-      />
+          <PlayerModal
+            pos={modalPos}
+            state={state}
+            onSelect={handleSelect}
+            onClose={() => setModalPos(null)}
+          />
+        </>
+      )}
 
     </section>
   );

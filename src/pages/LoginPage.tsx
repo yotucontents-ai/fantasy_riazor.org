@@ -1,12 +1,14 @@
 import { useState, type FormEvent } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { RiazorIcon } from '../components/RiazorIcon';
 
 type Mode = 'login' | 'register';
 
 export function LoginPage() {
-  const [mode, setMode] = useState<Mode>('login');
+  const location = useLocation();
+  const initialMode: Mode = (location.state as { mode?: Mode })?.mode ?? 'login';
+  const [mode, setMode] = useState<Mode>(initialMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
