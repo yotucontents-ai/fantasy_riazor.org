@@ -168,7 +168,7 @@ export async function calculateRoundPoints(roundId: string) {
 
 // ─── Ranking ──────────────────────────────────────────
 export async function getRanking(): Promise<RankingEntry[]> {
-  const usersSnap = await getDocs(collection(db, 'users'));
+  const usersSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'user')));
   const users = usersSnap.docs.map(d => d.data() as AppUser);
 
   // Get latest completed round for last round points (no orderBy to avoid needing a composite index)
