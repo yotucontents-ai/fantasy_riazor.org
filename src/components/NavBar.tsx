@@ -87,7 +87,7 @@ export function NavBar({ currentRound }: Props) {
           <span className="nav-jornada">Jornada {currentRound}</span>
         )}
         {appUser ? (
-          <div ref={menuRef} style={{ position: 'relative' }}>
+          <div ref={menuRef}>
             <button
               className="nav-avatar"
               onClick={() => setMenuOpen(v => !v)}

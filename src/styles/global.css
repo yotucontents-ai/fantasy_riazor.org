@@ -152,15 +152,15 @@ body::before {
   cursor: pointer;
 }
 .user-menu {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
+  position: fixed;
+  top: 60px;
+  right: 1rem;
   min-width: 200px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: 0 8px 24px rgba(0,0,0,.5);
-  z-index: 200;
+  z-index: 9999;
   overflow: hidden;
 }
 .user-menu-name {

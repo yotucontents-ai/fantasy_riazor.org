@@ -55,7 +55,7 @@ export function TopBar({ round }: Props) {
 
       <div className="top-bar-user">
         {appUser ? (
-          <div ref={menuRef} style={{ position: 'relative' }}>
+          <div ref={menuRef}>
             <button
               className="nav-avatar"
               onClick={() => setMenuOpen(v => !v)}
