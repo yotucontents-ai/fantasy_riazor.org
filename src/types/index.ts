@@ -16,11 +16,12 @@ export interface Score {
 export interface Prediction {
   userId: string;
   roundId: string;
-  lineup: number[]; // dorsals, 11 items
-  mvp: number; // dorsal
+  lineup: number[]; // dorsals, 11 items, 0 = empty slot
+  mvp: number; // dorsal, 0 = not set yet
   score: Score;
   points: number | null;
   submittedAt: Date;
+  confirmedParts?: { lineup: boolean; score: boolean; mvp: boolean };
 }
 
 export type RoundStatus = 'open' | 'locked' | 'completed';

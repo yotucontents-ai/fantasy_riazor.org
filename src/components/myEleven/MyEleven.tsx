@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pitch } from './Pitch';
-import { PitchSidebar } from './PitchSidebar';
 import { PlayerModal } from './PlayerModal';
 import { showToast } from '../Toast';
-import { ALL_PLAYERS, CAT_TO_POSITIONS, POSITIONS } from '../../data/players';
+import { CAT_TO_POSITIONS, POSITIONS } from '../../data/players';
+import { usePlayers } from '../../context/PlayersContext';
+import { Countdown } from '../Countdown';
 import { Link } from 'react-router-dom';
 import { savePrediction, getPrediction } from '../../firebase/db';
 import { useAuth } from '../../context/AuthContext';
@@ -14,21 +15,28 @@ interface Props {
   onPickedCountChange: (n: number) => void;
 }
 
-const INITIAL_STATE: LineupState = {
-  picked: {},
-  mvp: null,
-  score: { home: 0, away: 0 },
+type PredStep = 'home' | 'lineup' | 'score' | 'mvp';
+type Confirmed = { lineup: boolean; score: boolean; mvp: boolean };
+
+const INITIAL_STATE: LineupState = { picked: {}, mvp: null, score: { home: 0, away: 0 } };
+
+const CAT_TAG: Record<string, string> = {
+  porteros: 'POR', defensas: 'DEF', centrocampistas: 'MC', delanteros: 'DEL',
 };
 
 export function MyEleven({ round, onPickedCountChange }: Props) {
   const { firebaseUser } = useAuth();
+  const { allPlayers } = usePlayers();
   const [state, setState] = useState<LineupState>(INITIAL_STATE);
-  const [modalPos, setModalPos] = useState<Position | '__mvp__' | null>(null);
+  const [modalPos, setModalPos] = useState<Position | null>(null);
   const [saving, setSaving] = useState(false);
-  const [alreadySaved, setAlreadySaved] = useState(false);
-  const ref = useRef<HTMLElement>(null);
+  const [step, setStep] = useState<PredStep>('home');
+  const [confirmed, setConfirmed] = useState<Confirmed>({ lineup: false, score: false, mvp: false });
+  const [mvpQuery, setMvpQuery] = useState('');
 
-  const isLocked = !round || round.status !== 'open';
+  const isLocked = !round || round.status !== 'open' || new Date() > round.deadline;
+  const count = Object.keys(state.picked).length;
+  const allConfirmed = confirmed.lineup && confirmed.score && confirmed.mvp;
 
   // Load existing prediction
   useEffect(() => {
@@ -38,76 +46,69 @@ export function MyEleven({ round, onPickedCountChange }: Props) {
       const picked: Partial<Record<Position, Player>> = {};
       POSITIONS.forEach((pos, i) => {
         const d = pred.lineup[i];
-        const pl = ALL_PLAYERS.find(p => p.d === d);
+        const pl = allPlayers.find(p => p.d === d);
         if (pl) picked[pos] = pl;
       });
-      const mvp = ALL_PLAYERS.find(p => p.d === pred.mvp) ?? null;
+      const mvp = allPlayers.find(p => p.d === pred.mvp) ?? null;
       setState({ picked, mvp, score: pred.score });
-      setAlreadySaved(true);
+      const cp: Confirmed = pred.confirmedParts ?? {
+        lineup: pred.lineup.filter(Boolean).length === 11,
+        score: false,
+        mvp: (pred.mvp ?? 0) > 0,
+      };
+      setConfirmed(cp);
     });
-  }, [firebaseUser, round]);
+  }, [firebaseUser, round, allPlayers]);
 
-  // Notify parent of count changes
   useEffect(() => {
-    onPickedCountChange(Object.keys(state.picked).length);
-  }, [state.picked, onPickedCountChange]);
-
-  // Reveal animations
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const obs = new IntersectionObserver(entries => {
-      entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
-    }, { threshold: 0.08, rootMargin: '0px 0px -40px 0px' });
-    el.querySelectorAll('.reveal').forEach(r => obs.observe(r));
-    return () => obs.disconnect();
-  }, []);
-
-  function assignPlayer(pos: Position, player: Player) {
-    setState(prev => ({
-      ...prev,
-      picked: { ...prev.picked, [pos]: player },
-    }));
-  }
+    onPickedCountChange(count);
+  }, [count, onPickedCountChange]);
 
   function handleSelect(player: Player) {
-    if (modalPos === '__mvp__') {
-      setState(prev => ({ ...prev, mvp: player }));
-      showToast(`⭐ MVP: ${player.n}`, 'ok');
-    } else if (modalPos) {
-      assignPlayer(modalPos, player);
+    if (modalPos) {
+      setState(prev => {
+        const newPicked = { ...prev.picked };
+        (Object.keys(newPicked) as Position[]).forEach(p => {
+          if (newPicked[p]?.d === player.d) delete newPicked[p];
+        });
+        newPicked[modalPos] = player;
+        return { ...prev, picked: newPicked };
+      });
       showToast(`✓ ${player.n} → ${modalPos}`, 'ok');
     }
     setModalPos(null);
   }
 
-  // Register so Squad.tsx can call without prop drilling
   pickFromSquadFn = handlePickFromSquad;
 
   function handlePickFromSquad(player: Player) {
     const positions = CAT_TO_POSITIONS[player.cat];
-    const empty = positions.find(p => !state.picked[p as Position]);
+    const tempPicked = { ...state.picked };
+    (Object.keys(tempPicked) as Position[]).forEach(p => {
+      if (tempPicked[p]?.d === player.d) delete tempPicked[p];
+    });
+    const empty = positions.find(p => !tempPicked[p as Position]);
     if (empty) {
-      assignPlayer(empty as Position, player);
+      setState(prev => {
+        const np = { ...prev.picked };
+        (Object.keys(np) as Position[]).forEach(p => { if (np[p]?.d === player.d) delete np[p]; });
+        np[empty as Position] = player;
+        return { ...prev, picked: np };
+      });
       showToast(`✓ ${player.n} → ${empty}`, 'ok');
+      setStep('lineup');
     } else {
       showToast(`Ya tienes todos los ${player.cat} asignados`, 'warn');
     }
   }
 
-  function resetAll() {
-    setState(INITIAL_STATE);
-    setAlreadySaved(false);
-    showToast('↺ Alineación limpiada', 'ok');
+  function adjScore(field: 'home' | 'away', delta: number) {
+    const val = Math.max(0, Math.min(20, state.score[field] + delta));
+    setState(prev => ({ ...prev, score: { ...prev.score, [field]: val } }));
   }
 
-  async function confirmLineup() {
-    const count = Object.keys(state.picked).length;
-    if (count < 11) { showToast(`⚠️ Faltan ${11 - count} jugadores`, 'warn'); return; }
-    if (!state.mvp) { showToast('⚠️ Selecciona el MVP', 'warn'); return; }
-    if (!firebaseUser) { showToast('⚠️ Inicia sesión para guardar', 'warn'); return; }
-    if (!round) { showToast('⚠️ No hay jornada activa', 'warn'); return; }
-
+  async function doSave(newConfirmed: Confirmed) {
+    if (!firebaseUser || !round) return;
     setSaving(true);
     try {
       const lineup = POSITIONS.map(p => state.picked[p]?.d ?? 0);
@@ -115,12 +116,12 @@ export function MyEleven({ round, onPickedCountChange }: Props) {
         userId: firebaseUser.uid,
         roundId: round.id,
         lineup,
-        mvp: state.mvp.d,
+        mvp: state.mvp?.d ?? 0,
         score: state.score,
         submittedAt: new Date(),
+        confirmedParts: newConfirmed,
       });
-      setAlreadySaved(true);
-      showToast('🎉 ¡Alineación confirmada! Buena suerte', 'ok');
+      setConfirmed(newConfirmed);
     } catch {
       showToast('❌ Error al guardar, intenta de nuevo', 'warn');
     } finally {
@@ -128,19 +129,31 @@ export function MyEleven({ round, onPickedCountChange }: Props) {
     }
   }
 
-  const count = Object.keys(state.picked).length;
-  const notLoggedIn = !firebaseUser;
+  async function saveLineup() {
+    if (count < 11) { showToast(`⚠️ Faltan ${11 - count} jugadores`, 'warn'); return; }
+    await doSave({ ...confirmed, lineup: true });
+    showToast('✅ Alineación guardada', 'ok');
+    setStep('home');
+  }
 
-  return (
-    <section id="once" ref={ref}>
-      <div className="section-eyebrow reveal">Jornada {round?.number ?? '—'}</div>
-      <h2 className="section-title reveal" style={{ transitionDelay: '.05s' }}>Selecciona Tu Once</h2>
-      <p className="section-sub reveal" style={{ transitionDelay: '.1s' }}>
-        Toca cada posición en el campo para asignar jugador. Formación 4–4–2.
-      </p>
+  async function saveScore() {
+    await doSave({ ...confirmed, score: true });
+    showToast('✅ Resultado guardado', 'ok');
+    setStep('home');
+  }
 
-      {notLoggedIn ? (
-        <div className="login-gate reveal">
+  async function saveMvp() {
+    if (!state.mvp) { showToast('⚠️ Selecciona el MVP', 'warn'); return; }
+    await doSave({ ...confirmed, mvp: true });
+    showToast('🎉 ¡Todas tus predicciones guardadas! Buena suerte', 'ok');
+    setStep('home');
+  }
+
+  // ── Auth gate ──────────────────────────────────────────────────────
+  if (!firebaseUser) {
+    return (
+      <section id="once" style={{ padding: '2rem 1rem' }}>
+        <div className="login-gate">
           <div className="login-gate-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" width="48" height="48">
               <circle cx="12" cy="8" r="4"/>
@@ -156,64 +169,198 @@ export function MyEleven({ round, onPickedCountChange }: Props) {
             <Link to="/login" className="btn-ghost" style={{ textDecoration: 'none' }} state={{ mode: 'register' }}>Crear cuenta</Link>
           </div>
         </div>
-      ) : (
-        <>
-          {isLocked && (
-            <div className="locked-notice reveal">
-              <span className="locked-notice-icon">🔒</span>
-              <div className="locked-notice-text">
-                {!round
-                  ? <><strong>Sin jornada activa.</strong> El administrador debe crear una jornada.</>
-                  : round.status === 'locked'
-                  ? <><strong>Jornada cerrada.</strong> El plazo de envío ha terminado.</>
-                  : <><strong>Jornada completada.</strong> Ya se han calculado los puntos.</>
-                }
+      </section>
+    );
+  }
+
+  // ── Main render ────────────────────────────────────────────────────
+  return (
+    <section id="once">
+      <div className="once-section-wrap">
+
+        {/* Countdown */}
+        {round?.status === 'open' && (
+          <div className="deadline-banner">
+            ⏱ Tiempo para enviar: <Countdown deadline={round.deadline} />
+          </div>
+        )}
+
+        {/* Locked notice */}
+        {isLocked && (
+          <div className="locked-notice">
+            <span className="locked-notice-icon">🔒</span>
+            <div className="locked-notice-text">
+              {!round
+                ? <><strong>Sin jornada activa.</strong> El administrador debe crear una jornada.</>
+                : round.status === 'locked'
+                ? <><strong>Jornada cerrada.</strong> El plazo de envío ha terminado.</>
+                : <><strong>Jornada completada.</strong> Ya se han calculado los puntos.</>
+              }
+            </div>
+          </div>
+        )}
+
+        {/* ── LANDING ── */}
+        {step === 'home' && (
+          <div className="pred-landing">
+            <h2 className="pred-landing-title">Predicciones</h2>
+
+            {allConfirmed && !isLocked && (
+              <div className="pred-all-done">
+                🎉 ¡Todo guardado! Buena suerte.
+              </div>
+            )}
+
+            <div className="pred-landing-cards">
+              {/* Tu 11 */}
+              <button
+                className={`pred-lcard${confirmed.lineup ? ' confirmed' : ' pending'}`}
+                onClick={() => setStep('lineup')}
+              >
+                <div className="pred-lcard-badge">{confirmed.lineup ? '✓' : '!'}</div>
+                <div className="pred-lcard-icon">⚽</div>
+                <div className="pred-lcard-name">Tu 11</div>
+              </button>
+
+              {/* MVP */}
+              <button
+                className={`pred-lcard${confirmed.mvp ? ' confirmed' : ' pending'}${isLocked ? ' locked' : ''}`}
+                onClick={() => !isLocked && setStep('mvp')}
+              >
+                <div className="pred-lcard-badge">{confirmed.mvp ? '✓' : '!'}</div>
+                <div className="pred-lcard-icon">⭐</div>
+                <div className="pred-lcard-name">MVP</div>
+              </button>
+
+              {/* Resultado */}
+              <button
+                className={`pred-lcard${confirmed.score ? ' confirmed' : ' pending'}${isLocked ? ' locked' : ''}`}
+                onClick={() => !isLocked && setStep('score')}
+              >
+                <div className="pred-lcard-badge">{confirmed.score ? '✓' : '!'}</div>
+                <div className="pred-lcard-icon">
+                  <span className="lcard-score-wrap">
+                    <span className="lcard-score-box">{state.score.home}</span>
+                    <span className="lcard-score-vs">vs</span>
+                    <span className="lcard-score-box">{state.score.away}</span>
+                  </span>
+                </div>
+                <div className="pred-lcard-name">1 × 2</div>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── STEP: ALINEACIÓN ── */}
+        {step === 'lineup' && (
+          <div className="step-pane">
+            <div className="step-lineup-hdr">
+              <button className="btn-back-sm" onClick={() => setStep('home')}>← Volver</button>
+              {!isLocked && <span className="step-count-sm">{count}/11 seleccionados</span>}
+            </div>
+            <Pitch state={state} onOpen={pos => !isLocked && setModalPos(pos)} />
+            {!isLocked && (
+              <button
+                className="btn-confirm"
+                onClick={saveLineup}
+                disabled={saving || count < 11}
+              >
+                {saving ? 'Guardando…' : confirmed.lineup ? '✓ Guardada · Actualizar' : 'Guardar alineación →'}
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* ── STEP: RESULTADO ── */}
+        {step === 'score' && !isLocked && (
+          <div className="step-pane">
+            <button className="btn-back-sm" onClick={() => setStep('home')}>← Volver</button>
+            <h3 className="step-title">¿Cuál será el resultado?</h3>
+
+            <div className="score-big-wrap">
+              <div className="score-big-col">
+                <div className="score-team-name">{round?.homeGame ? 'Deportivo' : (round?.opponent ?? 'Local')}</div>
+                <div className="score-big-controls">
+                  <button className="score-big-btn" onClick={() => adjScore('home', +1)}>+</button>
+                  <div className="score-big-num">{state.score.home}</div>
+                  <button className="score-big-btn" onClick={() => adjScore('home', -1)}>−</button>
+                </div>
+              </div>
+              <div className="score-big-colon">:</div>
+              <div className="score-big-col">
+                <div className="score-team-name">{round?.homeGame ? (round?.opponent ?? 'Rival') : 'Deportivo'}</div>
+                <div className="score-big-controls">
+                  <button className="score-big-btn" onClick={() => adjScore('away', +1)}>+</button>
+                  <div className="score-big-num">{state.score.away}</div>
+                  <button className="score-big-btn" onClick={() => adjScore('away', -1)}>−</button>
+                </div>
               </div>
             </div>
-          )}
 
-      <div className="once-layout" style={{ pointerEvents: isLocked ? 'none' : undefined, opacity: isLocked ? 0.6 : 1 }}>
-        <div className="reveal">
-          <Pitch state={state} onOpen={pos => !isLocked && setModalPos(pos)} />
-        </div>
-        <div className="reveal" style={{ transitionDelay: '.15s' }}>
-          <PitchSidebar
-            state={state}
-            onMvpClick={() => !isLocked && setModalPos('__mvp__')}
-            onScoreChange={(home, away) => setState(prev => ({ ...prev, score: { home, away } }))}
-          />
-        </div>
+            <div className="step-footer">
+              <button className="btn-confirm" onClick={saveScore} disabled={saving}>
+                {saving ? 'Guardando…' : confirmed.score ? '✓ Guardado · Actualizar' : 'Guardar resultado →'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── STEP: MVP ── */}
+        {step === 'mvp' && !isLocked && (
+          <div className="step-pane">
+            <button className="btn-back-sm" onClick={() => setStep('home')}>← Volver</button>
+            <h3 className="step-title">¿Quién será el MVP?</h3>
+
+            <input
+              className="modal-search"
+              type="text"
+              placeholder="Buscar por nombre o dorsal…"
+              value={mvpQuery}
+              onChange={e => setMvpQuery(e.target.value.toLowerCase())}
+              style={{ margin: '0 0 .75rem' }}
+            />
+
+            <div className="mvp-step-list">
+              {allPlayers
+                .filter(p => p.n.toLowerCase().includes(mvpQuery) || String(p.d).includes(mvpQuery))
+                .map(p => {
+                  const sel = state.mvp?.d === p.d;
+                  return (
+                    <div
+                      key={p.d}
+                      className={`mrow${sel ? ' sel' : ''}`}
+                      onClick={() => setState(prev => ({ ...prev, mvp: p }))}
+                    >
+                      <div className="mrow-num">{p.d}</div>
+                      <div className="mrow-info">
+                        <div className="mrow-name">{p.n}</div>
+                        <div className="mrow-tag">{CAT_TAG[p.cat]}</div>
+                      </div>
+                      {sel && <div className="mrow-check">✓</div>}
+                    </div>
+                  );
+                })}
+            </div>
+
+            <div className="step-footer">
+              <button className="btn-confirm" onClick={saveMvp} disabled={saving || !state.mvp}>
+                {saving ? 'Guardando…' : confirmed.mvp ? '✓ Guardado · Actualizar' : 'Guardar MVP →'}
+              </button>
+            </div>
+          </div>
+        )}
+
       </div>
 
-      {!isLocked && (
-        <div className="submit-bar reveal" style={{ transitionDelay: '.2s' }}>
-          <div className="submit-info">
-            Jugadores: <strong>{count}/11</strong> &nbsp;·&nbsp;
-            MVP: <strong>{state.mvp ? state.mvp.n : 'Pendiente'}</strong> &nbsp;·&nbsp;
-            Resultado: <strong>{state.score.home} – {state.score.away}</strong>
-            {alreadySaved && <span style={{ color: 'var(--green)', marginLeft: '1rem' }}>✓ Guardado</span>}
-          </div>
-          <div className="submit-btns">
-            <button className="btn-reset" onClick={resetAll}>↺ Limpiar</button>
-            <button className="btn-confirm" onClick={confirmLineup} disabled={saving}>
-              {saving ? 'Guardando…' : alreadySaved ? 'Actualizar →' : 'Confirmar alineación →'}
-            </button>
-          </div>
-        </div>
-      )}
-
-          <PlayerModal
-            pos={modalPos}
-            state={state}
-            onSelect={handleSelect}
-            onClose={() => setModalPos(null)}
-          />
-        </>
-      )}
-
+      <PlayerModal
+        pos={modalPos}
+        state={state}
+        onSelect={handleSelect}
+        onClose={() => setModalPos(null)}
+      />
     </section>
   );
 }
 
-// Module-level ref so Squad can call pick without prop drilling
+// Module-level ref so Squad.tsx can call pick without prop drilling
 export let pickFromSquadFn: ((player: Player) => void) | null = null;

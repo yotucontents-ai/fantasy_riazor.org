@@ -25,37 +25,7 @@ export function PitchSidebar({ state, onMvpClick, onScoreChange }: Props) {
 
   return (
     <div className="once-sidebar">
-      {/* MI ONCE LIST */}
-      <div className="side-card">
-        <div className="side-header">
-          <div className="side-icon si-blue">📋</div>
-          Mi Once
-        </div>
-        <div className="my11-list">
-          {POSITIONS.map(p => {
-            const pl = state.picked[p];
-            return (
-              <div key={p} className="my11-row">
-                <div className="my11-pos">{p}</div>
-                <div className="my11-sep" />
-                <div className={`my11-name${pl ? ' picked' : ''}`}>{pl ? pl.n : 'vacío'}</div>
-                {pl && <div className="my11-dorsal show">{pl.d}</div>}
-              </div>
-            );
-          })}
-        </div>
-        <div className="progress-wrap">
-          <div className="progress-row">
-            <span className="progress-lbl">Completado</span>
-            <span className="progress-val">{count}/11</span>
-          </div>
-          <div className="prog-bar">
-            <div className="prog-fill" style={{ width: `${pct}%` }} />
-          </div>
-        </div>
-      </div>
-
-      {/* MVP */}
+      {/* MVP — primera fila, columna izquierda */}
       <div className="side-card">
         <div className="side-header">
           <div className="side-icon si-gold">🌟</div>
@@ -75,7 +45,7 @@ export function PitchSidebar({ state, onMvpClick, onScoreChange }: Props) {
         </div>
       </div>
 
-      {/* RESULTADO */}
+      {/* RESULTADO — primera fila, columna derecha */}
       <div className="side-card">
         <div className="side-header">
           <div className="side-icon si-green">🎯</div>
@@ -117,7 +87,37 @@ export function PitchSidebar({ state, onMvpClick, onScoreChange }: Props) {
         </div>
       </div>
 
-      {/* PUNTOS */}
+      {/* MI ONCE LIST — segunda fila, columna izquierda */}
+      <div className="side-card">
+        <div className="side-header">
+          <div className="side-icon si-blue">📋</div>
+          Mi Once
+        </div>
+        <div className="my11-list">
+          {POSITIONS.map(p => {
+            const pl = state.picked[p];
+            return (
+              <div key={p} className="my11-row">
+                <div className="my11-pos">{p}</div>
+                <div className="my11-sep" />
+                <div className={`my11-name${pl ? ' picked' : ''}`}>{pl ? pl.n : 'vacío'}</div>
+                {pl && <div className="my11-dorsal show">{pl.d}</div>}
+              </div>
+            );
+          })}
+        </div>
+        <div className="progress-wrap">
+          <div className="progress-row">
+            <span className="progress-lbl">Completado</span>
+            <span className="progress-val">{count}/11</span>
+          </div>
+          <div className="prog-bar">
+            <div className="prog-fill" style={{ width: `${pct}%` }} />
+          </div>
+        </div>
+      </div>
+
+      {/* PUNTOS — segunda fila, columna derecha */}
       <div className="side-card">
         <div className="side-header">
           <div className="side-icon si-gold">📊</div>

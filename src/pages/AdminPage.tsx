@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { getRounds, createRound, updateRound, calculateRoundPoints } from '../firebase/db';
+import { usePlayers, DEFAULT_ALL_PLAYERS } from '../context/PlayersContext';
+import { getRounds, createRound, updateRound, calculateRoundPoints, addPlayer, deletePlayer, seedDefaultPlayers } from '../firebase/db';
 import { showToast } from '../components/Toast';
 import { NavBar } from '../components/NavBar';
-import { ALL_PLAYERS } from '../data/players';
-import type { Round } from '../types';
+import type { Round, PlayerCategory } from '../types';
 
 function StatusBadge({ status }: { status: Round['status'] }) {
   const cls = status === 'open' ? 'status-open' : status === 'locked' ? 'status-locked' : 'status-completed';
@@ -13,8 +13,14 @@ function StatusBadge({ status }: { status: Round['status'] }) {
   return <span className={`round-status ${cls}`}>{label}</span>;
 }
 
+const CAT_LABELS: Record<PlayerCategory, string> = {
+  porteros: 'Porteros', defensas: 'Defensas',
+  centrocampistas: 'Centrocampistas', delanteros: 'Delanteros',
+};
+
 export function AdminPage() {
   const { appUser, loading } = useAuth();
+  const { allPlayers, plantilla, seeded, refresh: refreshPlayers } = usePlayers();
   const [rounds, setRounds] = useState<Round[]>([]);
   const [loadingRounds, setLoadingRounds] = useState(true);
   const [selectedRound, setSelectedRound] = useState<Round | null>(null);
@@ -32,15 +38,21 @@ export function AdminPage() {
     mvpDorsal: '', lineup: Array(11).fill(''),
   });
 
+  // Player form
+  const [playerForm, setPlayerForm] = useState({
+    d: '', n: '', cat: 'porteros' as PlayerCategory,
+  });
+
   useEffect(() => {
     loadRounds();
   }, []);
 
-  async function loadRounds() {
+  async function loadRounds(): Promise<Round[]> {
     setLoadingRounds(true);
     try {
       const r = await getRounds();
       setRounds(r);
+      return r;
     } finally {
       setLoadingRounds(false);
     }
@@ -94,13 +106,50 @@ export function AdminPage() {
         officialScore: { home: Number(resultsForm.homeScore), away: Number(resultsForm.awayScore) },
         status: 'locked',
       });
-      showToast('✅ Resultados guardados', 'ok');
-      loadRounds();
-    } catch {
-      showToast('❌ Error al guardar resultados', 'warn');
+      await calculateRoundPoints(selectedRound.id);
+      showToast('✅ Resultados guardados y puntos calculados', 'ok');
+      const fresh = await loadRounds();
+      const updated = fresh.find(r => r.id === selectedRound.id) ?? null;
+      setSelectedRound(updated);
+    } catch (e: unknown) {
+      showToast(`❌ ${e instanceof Error ? e.message : 'Error al guardar resultados'}`, 'warn');
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleSeedPlayers() {
+    setSaving(true);
+    try {
+      await seedDefaultPlayers(DEFAULT_ALL_PLAYERS);
+      await refreshPlayers();
+      showToast('✅ Plantilla importada', 'ok');
+    } catch { showToast('❌ Error al importar plantilla', 'warn'); }
+    finally { setSaving(false); }
+  }
+
+  async function handleAddPlayer() {
+    const d = Number(playerForm.d);
+    if (!d || !playerForm.n.trim()) { showToast('Introduce dorsal y nombre', 'warn'); return; }
+    if (allPlayers.some(p => p.d === d)) { showToast('Ya existe un jugador con ese dorsal', 'warn'); return; }
+    setSaving(true);
+    try {
+      await addPlayer({ d, n: playerForm.n.trim(), cat: playerForm.cat });
+      await refreshPlayers();
+      setPlayerForm({ d: '', n: '', cat: 'porteros' });
+      showToast('✅ Jugador añadido', 'ok');
+    } catch { showToast('❌ Error al añadir jugador', 'warn'); }
+    finally { setSaving(false); }
+  }
+
+  async function handleDeletePlayer(dorsal: number, name: string) {
+    setSaving(true);
+    try {
+      await deletePlayer(dorsal);
+      await refreshPlayers();
+      showToast(`🗑 ${name} eliminado`, 'ok');
+    } catch { showToast('❌ Error al eliminar jugador', 'warn'); }
+    finally { setSaving(false); }
   }
 
   async function handleCalculatePoints(id: string) {
@@ -225,6 +274,81 @@ export function AdminPage() {
             </div>
           </div>
 
+          {/* PLAYER MANAGEMENT */}
+          <div className="admin-card" style={{ gridColumn: '1 / -1' }}>
+            <div className="admin-card-head">👥 Gestión de Plantilla</div>
+            <div className="admin-card-body">
+              {!seeded && (
+                <div style={{ marginBottom: '1rem', padding: '.75rem 1rem', background: 'rgba(245,197,24,.08)', border: '1px solid rgba(245,197,24,.2)', borderRadius: 8 }}>
+                  <span style={{ color: 'var(--gold)', fontSize: '.85rem' }}>
+                    La plantilla aún no está en Firestore.
+                  </span>
+                  <button className="btn-admin" style={{ marginLeft: '1rem', padding: '.35rem .8rem', fontSize: '.78rem' }} onClick={handleSeedPlayers} disabled={saving}>
+                    ⬆ Importar plantilla por defecto
+                  </button>
+                </div>
+              )}
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+                {(Object.keys(CAT_LABELS) as PlayerCategory[]).map(cat => (
+                  <div key={cat}>
+                    <div style={{ fontSize: '.7rem', fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '.4rem' }}>
+                      {CAT_LABELS[cat]}
+                    </div>
+                    {plantilla[cat].length === 0 ? (
+                      <div style={{ fontSize: '.8rem', color: 'var(--text-muted)' }}>—</div>
+                    ) : plantilla[cat].map(p => (
+                      <div key={p.d} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '.3rem .5rem', borderRadius: 6, background: 'rgba(255,255,255,.04)', marginBottom: '.25rem' }}>
+                        <span style={{ fontSize: '.85rem' }}>
+                          <span style={{ color: 'var(--gold)', fontWeight: 700, marginRight: '.4rem' }}>{p.d}</span>
+                          {p.n}
+                        </span>
+                        <button
+                          onClick={() => handleDeletePlayer(p.d, p.n)}
+                          disabled={saving}
+                          style={{ background: 'none', border: 'none', color: 'rgba(255,80,80,.7)', cursor: 'pointer', fontSize: '.9rem', padding: '0 .2rem', lineHeight: 1 }}
+                          title="Eliminar jugador"
+                        >✕</button>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ borderTop: '1px solid rgba(255,255,255,.07)', paddingTop: '1rem' }}>
+                <div style={{ fontSize: '.72rem', fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '.6rem' }}>
+                  Añadir jugador
+                </div>
+                <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap' }}>
+                  <input
+                    className="admin-input" type="number" placeholder="Dorsal" min="1" max="99"
+                    style={{ width: 80 }}
+                    value={playerForm.d}
+                    onChange={e => setPlayerForm(p => ({ ...p, d: e.target.value }))}
+                  />
+                  <input
+                    className="admin-input" type="text" placeholder="Nombre del jugador"
+                    style={{ flex: 1, minWidth: 160 }}
+                    value={playerForm.n}
+                    onChange={e => setPlayerForm(p => ({ ...p, n: e.target.value }))}
+                  />
+                  <select
+                    className="admin-input" style={{ width: 170 }}
+                    value={playerForm.cat}
+                    onChange={e => setPlayerForm(p => ({ ...p, cat: e.target.value as PlayerCategory }))}
+                  >
+                    {(Object.keys(CAT_LABELS) as PlayerCategory[]).map(cat => (
+                      <option key={cat} value={cat}>{CAT_LABELS[cat]}</option>
+                    ))}
+                  </select>
+                  <button className="btn-admin" onClick={handleAddPlayer} disabled={saving}>
+                    + Añadir
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* RESULTS ENTRY */}
           {selectedRound && (
             <div className="admin-card" style={{ gridColumn: '1 / -1' }}>
@@ -253,7 +377,7 @@ export function AdminPage() {
                       <select className="admin-input" value={resultsForm.mvpDorsal}
                         onChange={e => setResultsForm(p => ({ ...p, mvpDorsal: e.target.value }))}>
                         <option value="">Seleccionar MVP…</option>
-                        {ALL_PLAYERS.map(p => (
+                        {allPlayers.map(p => (
                           <option key={p.d} value={p.d}>{p.d} · {p.n}</option>
                         ))}
                       </select>
@@ -274,7 +398,7 @@ export function AdminPage() {
                               setResultsForm(p => ({ ...p, lineup: updated }));
                             }}>
                             <option value="">Jugador {i + 1}…</option>
-                            {ALL_PLAYERS.map(p => (
+                            {allPlayers.map(p => (
                               <option key={p.d} value={p.d}>{p.d} · {p.n}</option>
                             ))}
                           </select>

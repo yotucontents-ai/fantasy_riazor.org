@@ -1,29 +1,18 @@
-import { useEffect, useRef } from 'react';
 import { RiazorIcon } from './RiazorIcon';
 import type { Round } from '../types';
+import type { Tab } from './BottomNav';
 
 interface Props {
   round: Round | null;
   pickedCount: number;
   totalScore: number;
   participantsCount: number;
+  onNavigate: (tab: Tab) => void;
 }
 
-export function Hero({ round, pickedCount, totalScore, participantsCount }: Props) {
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const obs = new IntersectionObserver(entries => {
-      entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
-    }, { threshold: 0.08, rootMargin: '0px 0px -40px 0px' });
-    el.querySelectorAll('.reveal').forEach(r => obs.observe(r));
-    return () => obs.disconnect();
-  }, []);
-
+export function Hero({ round, pickedCount, totalScore, participantsCount, onNavigate }: Props) {
   return (
-    <section className="hero" id="inicio" ref={ref}>
+    <section className="hero" id="inicio">
       <div className="hero-blob blob-1" />
       <div className="hero-blob blob-2" />
       <div className="hero-blob blob-3" />
@@ -47,8 +36,8 @@ export function Hero({ round, pickedCount, totalScore, participantsCount }: Prop
           Selecciona tu once titular del RC Deportivo, elige el MVP del partido y predice el marcador exacto cada jornada. El mejor clasificado al final de temporada gana el premio.
         </p>
         <div className="hero-cta reveal" style={{ transitionDelay: '.3s' }}>
-          <a href="#once" className="btn-gold">⚽ Hacer mi alineación</a>
-          <a href="#clasificacion" className="btn-ghost">🏆 Ver clasificación</a>
+          <button className="btn-gold" onClick={() => onNavigate('once')}>⚽ Hacer mi predicción</button>
+          <button className="btn-ghost" onClick={() => onNavigate('ranking')}>🏆 Ver clasificación</button>
         </div>
 
         <div className="hero-stats reveal" style={{ transitionDelay: '.4s' }}>
@@ -71,7 +60,6 @@ export function Hero({ round, pickedCount, totalScore, participantsCount }: Prop
         </div>
       </div>
 
-      <div className="scroll-hint">Scroll</div>
     </section>
   );
 }

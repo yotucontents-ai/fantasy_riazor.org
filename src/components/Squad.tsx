@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { PLANTILLA } from '../data/players';
+import { usePlayers } from '../context/PlayersContext';
 import { showToast } from './Toast';
 import { pickFromSquadFn } from './myEleven/MyEleven';
 import type { Player, PlayerCategory } from '../types';
@@ -20,6 +20,7 @@ const CAT_TAG: Record<PlayerCategory, string> = {
 };
 
 export function Squad() {
+  const { plantilla } = usePlayers();
   const [activeTab, setActiveTab] = useState<PlayerCategory | 'todos'>('todos');
   const ref = useRef<HTMLElement>(null);
 
@@ -34,8 +35,8 @@ export function Squad() {
   }, []);
 
   const players: Player[] = activeTab === 'todos'
-    ? Object.values(PLANTILLA).flat()
-    : PLANTILLA[activeTab];
+    ? Object.values(plantilla).flat()
+    : plantilla[activeTab];
 
   function handleCardClick(player: Player) {
     if (pickFromSquadFn) {

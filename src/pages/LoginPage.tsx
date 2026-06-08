@@ -37,6 +37,8 @@ export function LoginPage() {
         setError('Este email ya está registrado');
       } else if (code === 'auth/weak-password') {
         setError('La contraseña debe tener al menos 6 caracteres');
+      } else if (code === 'app/display-name-taken') {
+        setError('Ese nombre de usuario ya está en uso, elige otro');
       } else {
         setError('Error inesperado. Inténtalo de nuevo.');
       }

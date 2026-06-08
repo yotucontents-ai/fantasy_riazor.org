@@ -1,0 +1,49 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Devuelve true si la jornada existe, está en estado 'open' y no ha vencido el plazo
+    function roundIsOpen(roundId) {
+      let r = get(/databases/$(database)/documents/rounds/$(roundId)).data;
+      return r.status == 'open' && r.deadline > request.time;
+    }
+
+    // Users: cada usuario lee/escribe su propio doc; admins leen todos
+    match /users/{uid} {
+      allow read: if request.auth != null;
+      allow create: if request.auth.uid == uid;
+      allow update: if request.auth.uid == uid
+                    && !('role' in request.resource.data.diff(resource.data).affectedKeys())
+                    && !('totalPoints' in request.resource.data.diff(resource.data).affectedKeys());
+    }
+
+    // Players: todos los autenticados pueden leer; solo admins escriben
+    match /players/{dorsal} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+                   && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // Rounds: todos los autenticados pueden leer; solo admins escriben
+    match /rounds/{roundId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+                   && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // Predictions: lectura libre para autenticados
+    // Escritura solo si la jornada está 'open' Y no ha pasado el deadline
+    match /predictions/{predId} {
+      allow read: if request.auth != null;
+
+      allow create: if request.auth != null
+                    && request.resource.data.userId == request.auth.uid
+                    && roundIsOpen(request.resource.data.roundId);
+
+      allow update: if request.auth != null
+                    && resource.data.userId == request.auth.uid
+                    && request.resource.data.userId == request.auth.uid
+                    && roundIsOpen(resource.data.roundId);
+    }
+  }
+}

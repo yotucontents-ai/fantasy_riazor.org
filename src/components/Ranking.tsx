@@ -1,24 +1,54 @@
 import { useEffect, useRef, useState } from 'react';
 import { getRanking } from '../firebase/db';
 import { useAuth } from '../context/AuthContext';
-import type { RankingEntry } from '../types';
+import type { RankingEntry, Round } from '../types';
 
-const AVA_COLORS = [
-  ['#003087','#1a7fd4'], ['#1a2a6c','#b21f1f'],
-  ['#0f4c75','#1b262c'], ['#2d1b69','#11998e'],
-  ['#004e92','#000428'], ['#373b44','#4286f4'],
-  ['#0f2027','#203a43'], ['#1a1a2e','#e94560'],
-];
+const PAGE_SIZE = 10;
 
-export function Ranking() {
-  const { appUser } = useAuth();
+interface Props {
+  round: Round | null;
+  onViewPrediction: (uid: string, name: string) => void;
+  onParticipantsCount?: (n: number) => void;
+}
+
+export function Ranking({ round, onViewPrediction, onParticipantsCount }: Props) {
+  const { appUser, firebaseUser, loading: authLoading } = useAuth();
+  const now = new Date();
+  const canView = round !== null && (round.status !== 'open' || now > round.deadline);
   const [entries, setEntries] = useState<RankingEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(0);
   const ref = useRef<HTMLElement>(null);
 
+  function doFetch() {
+    setLoading(true);
+    setFetchError(null);
+    getRanking()
+      .then(e => {
+        setEntries(e);
+        setLoading(false);
+        onParticipantsCount?.(e.length);
+        // Saltar a la página del usuario logueado
+        if (appUser) {
+          const myIdx = e.findIndex(r => r.uid === appUser.uid);
+          if (myIdx >= 0) setPage(Math.floor(myIdx / PAGE_SIZE));
+        }
+      })
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('[Ranking] getRanking error:', err);
+        setFetchError(msg);
+        setLoading(false);
+      });
+  }
+
   useEffect(() => {
-    getRanking().then(e => { setEntries(e); setLoading(false); }).catch(() => setLoading(false));
-  }, []);
+    if (authLoading) return;
+    doFetch();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firebaseUser, authLoading]);
 
   useEffect(() => {
     const el = ref.current;
@@ -31,20 +61,21 @@ export function Ranking() {
   }, [loading]);
 
   const top3 = entries.slice(0, 3);
-  const podiumOrder = top3.length >= 3 ? [top3[1], top3[0], top3[2]] : top3;
-  const maxPts = entries[0]?.totalPoints ?? 1;
+  const maxPts = Math.max(entries[0]?.totalPoints ?? 1, 1);
 
-  const posClass = (i: number) => i === 0 ? 'second' : i === 1 ? 'first' : 'third';
-  const trophy = (i: number) => i === 0 ? '🥈' : i === 1 ? '🥇' : '🥉';
+  const trophy = (i: number) => i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉';
+  const podiumBorder = (i: number) => i === 0 ? '#f5c518' : i === 1 ? '#c0c0c0' : '#cd7f32';
 
-  const podiumAvaStyle = (i: number) => {
-    if (i === 1) return { background: 'linear-gradient(135deg,#8b6914,#f5c518)', borderColor: '#f5c518' };
-    if (i === 0) return { background: 'linear-gradient(135deg,#555,#bbb)',        borderColor: '#c0c0c0' };
-    return           { background: 'linear-gradient(135deg,#7a4a1a,#cd7f32)',    borderColor: '#cd7f32' };
-  };
+  const q = search.toLowerCase().trim();
+  const filtered = q
+    ? entries.filter(e => e.displayName.toLowerCase().includes(q))
+    : entries;
+  const pageCount = Math.ceil(filtered.length / PAGE_SIZE);
+  const pageEntries = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
-  function initials(name: string) {
-    return name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+  function handleSearch(val: string) {
+    setSearch(val);
+    setPage(0);
   }
 
   return (
@@ -57,87 +88,144 @@ export function Ranking() {
 
       {loading ? (
         <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '3rem' }}>Cargando…</div>
+      ) : fetchError ? (
+        <div style={{ textAlign: 'center', padding: '2rem', color: '#e94560' }}>
+          <div style={{ marginBottom: '.5rem', fontWeight: 600 }}>Error al cargar el ranking</div>
+          <code style={{ fontSize: '.75rem', background: 'rgba(255,255,255,.06)', padding: '.25rem .5rem', borderRadius: '4px', display: 'block', marginBottom: '1rem', wordBreak: 'break-all' }}>
+            {fetchError}
+          </code>
+          {!firebaseUser && (
+            <div style={{ color: 'var(--text-muted)', marginBottom: '1rem', fontSize: '.9rem' }}>
+              Necesitas iniciar sesión para ver el ranking.
+            </div>
+          )}
+          <button className="btn-ghost" onClick={doFetch} style={{ fontSize: '.85rem' }}>Reintentar</button>
+        </div>
       ) : entries.length === 0 ? (
-        <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '3rem' }}>
-          Todavía no hay participantes. ¡Sé el primero!
+        <div style={{ textAlign: 'center', padding: '2rem' }}>
+          <div style={{ color: 'var(--text-muted)', marginBottom: '1rem' }}>
+            Todavía no hay participantes. ¡Sé el primero!
+          </div>
+          {firebaseUser && (
+            <button className="btn-ghost" onClick={doFetch} style={{ fontSize: '.85rem' }}>Reintentar</button>
+          )}
         </div>
       ) : (
         <>
           {/* PODIUM */}
           {top3.length >= 2 && (
             <div className="podium reveal" style={{ transitionDelay: '.15s' }}>
-              {podiumOrder.map((entry, i) => entry && (
-                <div key={entry.uid} className={`podium-item ${posClass(i)}`}>
+              {top3.map((entry, i) => entry && (
+                <div key={entry.uid} className="podium-item" style={{ borderColor: podiumBorder(i) }}>
                   <span className="podium-trophy">{trophy(i)}</span>
-                  <div className="podium-avatar" style={podiumAvaStyle(i)}>{initials(entry.displayName)}</div>
                   <div className="podium-name">{entry.displayName}</div>
                   <div className="podium-pts">
                     {entry.totalPoints} <span className="pts-lbl">pts</span>
                   </div>
-                  <div className="podium-extra">MVP: {entry.mvpHits} ✓ · Resultados: {entry.scoreHits} ✓</div>
                 </div>
               ))}
             </div>
           )}
 
+          {/* BUSCADOR */}
+          <div className="rank-search-wrap reveal" style={{ transitionDelay: '.18s' }}>
+            <input
+              className="rank-search"
+              type="text"
+              placeholder="Buscar participante…"
+              value={search}
+              onChange={e => handleSearch(e.target.value)}
+            />
+            {search && (
+              <button className="rank-search-clear" onClick={() => handleSearch('')}>✕</button>
+            )}
+          </div>
+
           {/* TABLE */}
           <div className="rank-table-wrap reveal" style={{ transitionDelay: '.2s' }}>
-            <table className="rank-table">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Participante</th>
-                  <th>PJ</th>
-                  <th>Puntos</th>
-                  <th>MVP ✓</th>
-                  <th>Result ✓</th>
-                  <th className="rbar-wrap">Progreso</th>
-                  <th>Últ. jorn.</th>
-                </tr>
-              </thead>
-              <tbody>
-                {entries.map((r, idx) => {
-                  const pos = idx + 1;
-                  const [c1, c2] = AVA_COLORS[idx % AVA_COLORS.length];
-                  const posIcon = pos === 1 ? '🥇' : pos === 2 ? '🥈' : pos === 3 ? '🥉' : pos;
-                  const posGold = pos === 1 ? 'g' : pos === 2 ? 's' : pos === 3 ? 'b' : '';
-                  const pct = Math.round((r.totalPoints / maxPts) * 100);
-                  const lp = r.lastRoundPoints;
-                  const lCls = lp !== null ? (lp >= 10 ? 'g' : lp >= 7 ? 'y' : 'r') : 'eq';
-                  const isMe = appUser?.uid === r.uid;
+            {filtered.length === 0 ? (
+              <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>
+                Sin resultados para «{search}»
+              </div>
+            ) : (
+              <table className="rank-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Participante</th>
+                    <th>PJ</th>
+                    <th>Puntos</th>
+                    <th>MVP ✓</th>
+                    <th>Result ✓</th>
+                    <th className="rbar-wrap">Progreso</th>
+                    <th>Últ. jorn.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageEntries.map(r => {
+                    const globalIdx = filtered.indexOf(r);
+                    const pos = globalIdx + 1;
+                    const posIcon = pos === 1 ? '🥇' : pos === 2 ? '🥈' : pos === 3 ? '🥉' : pos;
+                    const posGold = pos === 1 ? 'g' : pos === 2 ? 's' : pos === 3 ? 'b' : '';
+                    const pct = Math.round((r.totalPoints / maxPts) * 100);
+                    const lp = r.lastRoundPoints;
+                    const lCls = lp !== null ? (lp >= 10 ? 'g' : lp >= 7 ? 'y' : 'r') : 'eq';
+                    const isMe = appUser?.uid === r.uid;
 
-                  return (
-                    <tr key={r.uid} className={isMe ? 'me' : ''}>
-                      <td><div className={`rpos ${posGold}`}>{posIcon}</div></td>
-                      <td>
-                        <div className="rplayer">
-                          <div className="rava" style={{ background: `linear-gradient(135deg,${c1},${c2})`, borderColor: c2 }}>
-                            {initials(r.displayName)}
-                          </div>
-                          <div>
+                    return (
+                      <tr
+                        key={r.uid}
+                        className={`${isMe ? 'me' : ''}${canView ? ' rank-clickable' : ''}`}
+                        onClick={() => canView && onViewPrediction(r.uid, r.displayName)}
+                        title={canView ? `Ver predicción de ${r.displayName}` : undefined}
+                      >
+                        <td><div className={`rpos ${posGold}`}>{posIcon}</div></td>
+                        <td>
+                          <div className="rplayer">
                             <div className="rname">{r.displayName}</div>
                             <div className="rdetail">MVP: {r.mvpHits} ✓ · Res: {r.scoreHits} ✓</div>
                           </div>
-                        </div>
-                      </td>
-                      <td style={{ color: 'var(--text-muted)' }}>{r.roundsPlayed}</td>
-                      <td><div className="rpts">{r.totalPoints}</div></td>
-                      <td style={{ color: 'var(--text-muted)' }}>{r.mvpHits}</td>
-                      <td style={{ color: 'var(--text-muted)' }}>{r.scoreHits}</td>
-                      <td className="rbar-wrap">
-                        <div className="rbar"><div className="rbar-fill" style={{ width: `${pct}%` }} /></div>
-                      </td>
-                      <td>
-                        <span className={`rlast ${lCls}`}>
-                          {lp !== null ? lp : '—'}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        </td>
+                        <td style={{ color: 'var(--text-muted)' }}>{r.roundsPlayed}</td>
+                        <td><div className="rpts">{r.totalPoints}</div></td>
+                        <td style={{ color: 'var(--text-muted)' }}>{r.mvpHits}</td>
+                        <td style={{ color: 'var(--text-muted)' }}>{r.scoreHits}</td>
+                        <td className="rbar-wrap">
+                          <div className="rbar"><div className="rbar-fill" style={{ width: `${pct}%` }} /></div>
+                        </td>
+                        <td>
+                          <span className={`rlast ${lCls}`}>{lp !== null ? lp : '—'}</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
           </div>
+
+          {/* PAGINACIÓN */}
+          {pageCount > 1 && (
+            <div className="rank-pagination">
+              <button
+                className="rank-page-btn"
+                disabled={page === 0}
+                onClick={() => setPage(p => p - 1)}
+              >
+                ← Anteriores
+              </button>
+              <span className="rank-page-info">
+                {page + 1} / {pageCount}
+              </span>
+              <button
+                className="rank-page-btn"
+                disabled={page >= pageCount - 1}
+                onClick={() => setPage(p => p + 1)}
+              >
+                Siguientes →
+              </button>
+            </div>
+          )}
         </>
       )}
     </section>

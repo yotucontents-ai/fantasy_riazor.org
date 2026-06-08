@@ -1,71 +1,152 @@
+import { useRef, useState } from 'react';
 import type { LineupState, Position } from '../../types';
+
+// Simple shirt path centred at (0,0): ~13w × 11h SVG units
+const SHIRT =
+  'M 0,-5.5 C -1,-5.5 -2,-5.2 -2.5,-4.5 L -5,-3.5 L -6.5,-2.5 L -6,-1 L -5,-1 L -4.5,5.5 L 4.5,5.5 L 5,-1 L 6,-1 L 6.5,-2.5 L 5,-3.5 C 2,-5.2 1,-5.5 0,-5.5 Z';
+
+type SlotPos = { cx: number; cy: number };
 
 interface SlotProps {
   id: Position;
   cx: number;
   cy: number;
   label: string;
+  isGK: boolean;
   state: LineupState;
   onOpen: (pos: Position) => void;
+  onMove: (id: Position, cx: number, cy: number) => void;
+  svgRef: React.RefObject<SVGSVGElement | null>;
 }
 
-function Slot({ id, cx, cy, label, state, onOpen }: SlotProps) {
+function Slot({ id, cx, cy, label, isGK, state, onOpen, onMove, svgRef }: SlotProps) {
   const player = state.picked[id];
   const filled = !!player;
-  const shortName = player ? player.n.split(' ')[0].slice(0, 9) : '—';
+  const lastName = player ? (player.n.split(' ').pop() ?? player.n).slice(0, 9) : '';
+
+  const movedRef = useRef(false);
+  const originRef = useRef({ x: 0, y: 0 });
+
+  function toSVG(e: React.PointerEvent): { x: number; y: number } {
+    const svg = svgRef.current;
+    if (!svg) return { x: cx, y: cy };
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+    const inv = svg.getScreenCTM()?.inverse();
+    if (!inv) return { x: cx, y: cy };
+    const r = pt.matrixTransform(inv);
+    return { x: r.x, y: r.y };
+  }
+
+  function handlePointerDown(e: React.PointerEvent<SVGGElement>) {
+    e.stopPropagation();
+    e.preventDefault(); // prevent synthetic click/mousedown after pointerup on mobile
+    e.currentTarget.setPointerCapture(e.pointerId);
+    movedRef.current = false;
+    const p = toSVG(e);
+    originRef.current = { x: p.x - cx, y: p.y - cy };
+  }
+
+  function handlePointerMove(e: React.PointerEvent<SVGGElement>) {
+    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+    const p = toSVG(e);
+    const nx = Math.max(7, Math.min(61, p.x - originRef.current.x));
+    const ny = Math.max(6, Math.min(98, p.y - originRef.current.y));
+    if (Math.hypot(nx - cx, ny - cy) > 5) movedRef.current = true;
+    if (movedRef.current) onMove(id, nx, ny);
+  }
+
+  function handlePointerUp(e: React.PointerEvent<SVGGElement>) {
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    if (!movedRef.current) onOpen(id);
+  }
+
+  const shirtFill   = filled ? (isGK ? '#1e8c44' : '#003da5') : (isGK ? 'rgba(30,140,68,.28)' : 'rgba(0,61,165,.28)');
+  const shirtStroke = filled ? 'rgba(255,255,255,.8)' : 'rgba(255,255,255,.3)';
+  const labelColor  = filled ? '#fff' : 'rgba(255,255,255,.45)';
 
   return (
-    <g className="pslot" onClick={() => onOpen(id)}>
-      <g className="pc">
-        <circle className={`slot-bg${filled ? ' filled' : ''}`} cx={cx} cy={cy} r={5.8} />
-        <text className="slot-pos-text" x={cx} y={cy - 2.5}>{label}</text>
-        <text className="slot-name-text" x={cx} y={cy + 2.5}>{shortName}</text>
-        {filled && (
-          <>
-            <rect className="slot-num-bg" x={cx + 2.5} y={cy - 7} width={8} height={5.5} rx={1.5} />
-            <text className="slot-num-txt" x={cx + 6.5} y={cy - 3.8}>{player.d}</text>
-          </>
-        )}
-      </g>
+    <g
+      transform={`translate(${cx},${cy})`}
+      style={{ cursor: 'grab', touchAction: 'none', userSelect: 'none' }}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+    >
+      {/* drop shadow */}
+      <path d={SHIRT} fill="rgba(0,0,0,.28)" transform="translate(.6,1.4) scale(1.04,1.04)" />
+      {/* shirt body */}
+      <path d={SHIRT} fill={shirtFill} stroke={shirtStroke} strokeWidth=".65" strokeLinejoin="round" />
+      {/* position number */}
+      <text
+        x="0" y="1.2"
+        textAnchor="middle" dominantBaseline="middle"
+        fontSize="4.4" fontWeight="900"
+        fontFamily="'Barlow Condensed', sans-serif"
+        fill={labelColor}
+        style={{ pointerEvents: 'none' }}
+      >
+        {label}
+      </text>
+      {/* player last name below shirt */}
+      <text
+        x="0" y="9"
+        textAnchor="middle" dominantBaseline="middle"
+        fontSize="2.7" fontWeight="700"
+        fontFamily="'Barlow Condensed', sans-serif"
+        fill={filled ? 'rgba(255,255,255,.92)' : 'transparent'}
+        style={{ pointerEvents: 'none' }}
+      >
+        {lastName}
+      </text>
     </g>
   );
 }
+
+const SLOTS: { id: Position; cx: number; cy: number; label: string; isGK: boolean }[] = [
+  { id: 'POR',  cx: 34, cy: 92, label: '1',  isGK: true  },
+  { id: 'LD',   cx:  9, cy: 74, label: '2',  isGK: false },
+  { id: 'DC1',  cx: 25, cy: 74, label: '3',  isGK: false },
+  { id: 'DC2',  cx: 43, cy: 74, label: '4',  isGK: false },
+  { id: 'LI',   cx: 59, cy: 74, label: '5',  isGK: false },
+  { id: 'MCD',  cx:  9, cy: 53, label: '6',  isGK: false },
+  { id: 'MC1',  cx: 25, cy: 53, label: '7',  isGK: false },
+  { id: 'MC2',  cx: 43, cy: 53, label: '8',  isGK: false },
+  { id: 'MCO',  cx: 59, cy: 53, label: '9',  isGK: false },
+  { id: 'DEL1', cx: 23, cy: 28, label: '10', isGK: false },
+  { id: 'DEL2', cx: 45, cy: 28, label: '11', isGK: false },
+];
 
 interface Props {
   state: LineupState;
   onOpen: (pos: Position) => void;
 }
 
-const SLOTS: { id: Position; cx: number; cy: number; label: string }[] = [
-  { id: 'POR',  cx: 34, cy: 93, label: 'POR' },
-  { id: 'LD',   cx:  9, cy: 75, label: 'LD'  },
-  { id: 'DC1',  cx: 25, cy: 75, label: 'DC'  },
-  { id: 'DC2',  cx: 43, cy: 75, label: 'DC'  },
-  { id: 'LI',   cx: 59, cy: 75, label: 'LI'  },
-  { id: 'MCD',  cx:  9, cy: 53, label: 'MCD' },
-  { id: 'MC1',  cx: 25, cy: 53, label: 'MC'  },
-  { id: 'MC2',  cx: 43, cy: 53, label: 'MC'  },
-  { id: 'MCO',  cx: 59, cy: 53, label: 'MCO' },
-  { id: 'DEL1', cx: 23, cy: 28, label: 'DEL' },
-  { id: 'DEL2', cx: 45, cy: 28, label: 'DEL' },
-];
+function initPositions(): Record<Position, SlotPos> {
+  const r = {} as Record<Position, SlotPos>;
+  SLOTS.forEach(s => { r[s.id] = { cx: s.cx, cy: s.cy }; });
+  return r;
+}
 
 export function Pitch({ state, onOpen }: Props) {
-  const count = Object.keys(state.picked).length;
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [positions, setPositions] = useState<Record<Position, SlotPos>>(initPositions);
+
+  function handleMove(id: Position, cx: number, cy: number) {
+    setPositions(prev => ({ ...prev, [id]: { cx, cy } }));
+  }
 
   return (
     <div className="pitch-card">
-      <div className="pitch-card-header">
-        <div className="pitch-meta">
-          <div className="pitch-meta-title">Campo · Formación</div>
-          <div className="pitch-meta-sub">{count} de 11 posiciones completadas</div>
-        </div>
-        <div className="pitch-actions">
-          <div className="formation-pill">4 – 4 – 2</div>
-        </div>
-      </div>
       <div className="pitch-turf">
-        <svg className="pitch-svg" viewBox="0 0 68 104" xmlns="http://www.w3.org/2000/svg">
+        <svg
+          ref={svgRef}
+          className="pitch-svg"
+          viewBox="0 0 68 104"
+          xmlns="http://www.w3.org/2000/svg"
+          style={{ touchAction: 'none', display: 'block' }}
+        >
           {/* Field lines */}
           <rect x=".4" y=".4" width="67.2" height="103.2" fill="none" stroke="rgba(255,255,255,.5)" strokeWidth=".7" />
           <line x1=".4" y1="52" x2="67.6" y2="52" stroke="rgba(255,255,255,.5)" strokeWidth=".7" />
@@ -85,7 +166,16 @@ export function Pitch({ state, onOpen }: Props) {
           <path d="M 67.6 103.6 A 2 2 0 0 1 65.6 101.6" fill="none" stroke="rgba(255,255,255,.35)" strokeWidth=".6" />
 
           {SLOTS.map(s => (
-            <Slot key={s.id} {...s} state={state} onOpen={onOpen} />
+            <Slot
+              key={s.id}
+              {...s}
+              cx={positions[s.id].cx}
+              cy={positions[s.id].cy}
+              state={state}
+              onOpen={onOpen}
+              onMove={handleMove}
+              svgRef={svgRef}
+            />
           ))}
         </svg>
       </div>

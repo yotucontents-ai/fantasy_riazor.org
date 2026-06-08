@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
-import { PLANTILLA, POS_LABEL } from '../../data/players';
+import { useState, useEffect, useRef } from 'react';
+import { usePlayers } from '../../context/PlayersContext';
+import { POS_LABEL } from '../../data/players';
 import type { Player, Position, LineupState } from '../../types';
 
 interface Props {
@@ -17,11 +18,16 @@ const SECTIONS = [
 ];
 
 export function PlayerModal({ pos, state, onSelect, onClose }: Props) {
+  const { plantilla } = usePlayers();
   const [query, setQuery] = useState('');
   const open = pos !== null;
+  const openTimeRef = useRef(0);
 
   useEffect(() => {
-    if (open) setQuery('');
+    if (open) {
+      setQuery('');
+      openTimeRef.current = Date.now();
+    }
   }, [open, pos]);
 
   useEffect(() => {
@@ -53,7 +59,7 @@ export function PlayerModal({ pos, state, onSelect, onClose }: Props) {
         </div>
         <div className="modal-list">
           {SECTIONS.map(sec => {
-            const filtered = PLANTILLA[sec.key].filter(
+            const filtered = plantilla[sec.key].filter(
               p => p.n.toLowerCase().includes(query) || String(p.d).includes(query)
             );
             if (!filtered.length) return null;
@@ -65,7 +71,7 @@ export function PlayerModal({ pos, state, onSelect, onClose }: Props) {
                     ? state.mvp?.d === p.d
                     : state.picked[pos as Position]?.d === p.d;
                   return (
-                    <div key={p.d} className={`mrow${sel ? ' sel' : ''}`} onClick={() => onSelect(p)}>
+                    <div key={p.d} className={`mrow${sel ? ' sel' : ''}`} onClick={() => { if (Date.now() - openTimeRef.current < 400) return; onSelect(p); }}>
                       <div className="mrow-num">{p.d}</div>
                       <div className="mrow-info">
                         <div className="mrow-name">{p.n}</div>

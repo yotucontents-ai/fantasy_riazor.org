@@ -1,9 +1,29 @@
 import {
-  doc, getDoc, setDoc, updateDoc, collection,
+  doc, getDoc, setDoc, updateDoc, deleteDoc, collection,
   query, orderBy, getDocs, Timestamp, where, writeBatch, increment,
 } from 'firebase/firestore';
 import { db } from './config';
-import type { AppUser, Round, Prediction, RankingEntry } from '../types';
+import type { AppUser, Round, Prediction, RankingEntry, Player } from '../types';
+
+// ─── Players ──────────────────────────────────────────
+export async function getPlayers(): Promise<Player[]> {
+  const snap = await getDocs(query(collection(db, 'players'), orderBy('d', 'asc')));
+  return snap.docs.map(d => d.data() as Player);
+}
+
+export async function addPlayer(player: Player): Promise<void> {
+  await setDoc(doc(db, 'players', String(player.d)), player);
+}
+
+export async function deletePlayer(dorsal: number): Promise<void> {
+  await deleteDoc(doc(db, 'players', String(dorsal)));
+}
+
+export async function seedDefaultPlayers(players: Player[]): Promise<void> {
+  const batch = writeBatch(db);
+  players.forEach(p => batch.set(doc(db, 'players', String(p.d)), p));
+  await batch.commit();
+}
 
 // ─── Users ───────────────────────────────────────────
 export async function createUserDoc(uid: string, displayName: string, email: string) {
@@ -13,6 +33,12 @@ export async function createUserDoc(uid: string, displayName: string, email: str
     totalPoints: 0,
     createdAt: Timestamp.now(),
   });
+}
+
+export async function isDisplayNameTaken(displayName: string): Promise<boolean> {
+  const q = query(collection(db, 'users'), where('displayName', '==', displayName));
+  const snap = await getDocs(q);
+  return !snap.empty;
 }
 
 export async function getUserDoc(uid: string): Promise<AppUser | null> {
@@ -34,6 +60,11 @@ export async function getRounds(): Promise<Round[]> {
       deadline: data.deadline.toDate(),
     } as Round;
   });
+}
+
+export async function getLatestRound(): Promise<Round | null> {
+  const rounds = await getRounds();
+  return rounds[0] ?? null;
 }
 
 export async function getOpenRound(): Promise<Round | null> {
@@ -140,33 +171,39 @@ export async function getRanking(): Promise<RankingEntry[]> {
   const usersSnap = await getDocs(collection(db, 'users'));
   const users = usersSnap.docs.map(d => d.data() as AppUser);
 
-  // Get latest completed round for last round points
-  const roundsQ = query(collection(db, 'rounds'), where('status', '==', 'completed'), orderBy('number', 'desc'));
+  // Get latest completed round for last round points (no orderBy to avoid needing a composite index)
+  const roundsQ = query(collection(db, 'rounds'), where('status', '==', 'completed'));
   const roundsSnap = await getDocs(roundsQ);
-  const latestRoundId = roundsSnap.docs[0]?.id ?? null;
+  const sortedRounds = roundsSnap.docs.slice().sort((a, b) => (b.data().number ?? 0) - (a.data().number ?? 0));
+  const latestRoundId = sortedRounds[0]?.id ?? null;
 
   const entries: RankingEntry[] = await Promise.all(users.map(async u => {
-    const predsQ = query(collection(db, 'predictions'), where('userId', '==', u.uid));
-    const predsSnap = await getDocs(predsQ);
-    const preds = predsSnap.docs.map(d => d.data() as Prediction & { points: number });
-
-    const roundsPlayed = preds.filter(p => p.points !== null).length;
-    const mvpHits = preds.filter(p => {
-      // We'd need to cross-reference rounds — approximation: count per round
-      return p.points !== null && p.points >= 3;
-    }).length;
-    const scoreHits = preds.filter(p => p.points !== null && p.points >= 5).length;
-
+    let roundsPlayed = 0;
+    let mvpHits = 0;
+    let scoreHits = 0;
     let lastRoundPoints: number | null = null;
-    if (latestRoundId) {
-      const lp = preds.find(p => p.roundId === latestRoundId);
-      lastRoundPoints = lp?.points ?? null;
+
+    try {
+      const predsQ = query(collection(db, 'predictions'), where('userId', '==', u.uid));
+      const predsSnap = await getDocs(predsQ);
+      const preds = predsSnap.docs.map(d => d.data() as Prediction & { points: number });
+
+      roundsPlayed = preds.filter(p => p.points !== null).length;
+      mvpHits = preds.filter(p => p.points !== null && p.points >= 3).length;
+      scoreHits = preds.filter(p => p.points !== null && p.points >= 5).length;
+
+      if (latestRoundId) {
+        const lp = preds.find(p => p.roundId === latestRoundId);
+        lastRoundPoints = lp?.points ?? null;
+      }
+    } catch {
+      // Fallback to zeros if predictions can't be read
     }
 
     return {
       uid: u.uid,
       displayName: u.displayName,
-      totalPoints: u.totalPoints,
+      totalPoints: u.totalPoints ?? 0,
       roundsPlayed,
       mvpHits,
       scoreHits,
